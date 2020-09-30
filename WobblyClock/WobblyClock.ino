@@ -4,22 +4,22 @@
 // Both the AccelStepper and FastLED libraries use interrupts and will conflict with each other.
 // code has been running on an ESP32 (Lolin D32). Will be attempting to use a version of FastLED that
 // will eliminate the interrupts.
-
-#include <AccelStepper.h>
+#include <WS2812Serial.h>
+#define USE_WS2812SERIAL
 #include <FastLED.h>
-#define LED_PIN 4
+#include <AccelStepper.h>
 
-
+#define LED_PIN             1
 #define BRIGHTNESS          64
 
 #define PIXELS_PER_SEGMENT  3  
 #define SEGMENTS_PER_DIGIT  7
-#define PIXELS_PER_DIGIT    PIXELS_PER_SEGMENT*SEGMENTS_PER_DIGIT
+#define PIXELS_PER_DIGIT    21 //PIXELS_PER_SEGMENT*SEGMENTS_PER_DIGIT
 #define NUM_DIGITS          4
 #define NUM_DOTS            2
-#define NUM_LEDS            PIXELS_PER_DIGIT*NUM_DIGITS + NUM_DOTS
-#define DOT_TOP             PIXELS_PER_DIGIT*NUM_DIGITS
-#define DOT_BOTTOM          DOT_TOP + 1
+#define NUM_LEDS            86 //PIXELS_PER_DIGIT*NUM_DIGITS + NUM_DOTS
+#define DOT_TOP             84 //PIXELS_PER_DIGIT*NUM_DIGITS
+#define DOT_BOTTOM          85 //DOT_TOP + 1
 
 CRGB leds[NUM_LEDS];
 
@@ -29,73 +29,8 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 uint8_t segmentOffsets[SEGMENTS_PER_DIGIT][PIXELS_PER_SEGMENT] = {{0,1,2},{3,4,5},{6,7,8},{9,10,11},{12,13,14},{15,16,17},{18,19,20}};
 
 
-struct Number {
-  uint8_t nSegments;
-  uint8_t* segments;
-};
-
-#define NUM_LETTERS 26
-Number letters[NUM_LETTERS];
-
-//Segments comprising each letter for a seven-segment "alphabet"
-uint8_t letA[] = {0,1,2,4,5,6};
-uint8_t letB[] = {2,3,4,5,6};
-uint8_t letC[] = {0,3,4,5};
-uint8_t letD[] = {1,2,3,4,6};
-uint8_t letE[] = {0,1,3,4,5,6};
-uint8_t letF[] = {0,1,4,5,6};
-uint8_t letG[] = {0,2,3,4,5};
-uint8_t letH[] = {2,4,5,6};
-uint8_t letI[] = {2};
-uint8_t letJ[] = {1,2,3,4};
-uint8_t letK[] = {0,2,4,5,6};
-uint8_t letL[] = {3,4,5};
-uint8_t letM[] = {0,2,4,6};
-uint8_t letN[] = {2,4,6};
-uint8_t letO[] = {2,3,4,6};
-uint8_t letP[] = {0,1,4,5,6};
-uint8_t letQ[] = {0,1,2,5,6};
-uint8_t letR[] = {4,6};
-uint8_t letS[] = {0,2,3,5,6};
-uint8_t letT[] = {3,4,5,6};
-uint8_t letU[] = {1,2,3,4,5};
-uint8_t letV[] = {2,3,4};
-uint8_t letW[] = {1,3,5,6};
-uint8_t letX[] = {1,2,4,5,6};
-uint8_t letY[] = {1,2,3,5,6};
-uint8_t letZ[] = {0,1,3,4,6};
-
-uint8_t* orderedLetters[NUM_LETTERS] = {letA, letB, letC, letD, letE, letF, letG, letH, letI, letJ, letK, letL, letM, letN, letO, letP, letQ, letR, letS, letT, letU, letV, letW, letX, letY, letZ};
-void initializeLetters() {
-  for (int i = 0; i < NUM_LETTERS; i++) {
-    letters[i].segments = orderedLetters[i];
-    letters[i].nSegments = sizeof(orderedLetters[i])/sizeof(orderedLetters[i][0]);
-  }  
-}
-
-#define NUM_NUMBERS 10
-Number numbers[NUM_NUMBERS];
-
-//Lists of segments which comprise each number
-uint8_t num0[] = {0,1,2,3,4,5}; 
-uint8_t num1[] = {1,2}; 
-uint8_t num2[] = {0,1,3,4,6}; 
-uint8_t num3[] = {0,1,2,3,6}; 
-uint8_t num4[] = {1,2,5,6}; 
-uint8_t num5[] = {0,2,3,5,6}; 
-uint8_t num6[] = {0,2,3,4,5,6}; 
-uint8_t num7[] = {0,1,2}; 
-uint8_t num8[] = {0,1,2,3,4,5,6}; 
-uint8_t num9[] = {0,1,2,5,6}; 
-
-uint8_t* orderedNumbers[NUM_NUMBERS] = {num0, num1, num2, num3, num4, num5, num6, num7, num8, num9};
-
-void initializeNumbers() {
-  for (int i = 0; i < NUM_NUMBERS; i++) {
-    numbers[i].segments = orderedNumbers[i];
-    numbers[i].nSegments = sizeof(orderedNumbers[i])/sizeof(orderedNumbers[i][0]);
-  }  
-}
+// Bitwise representation of segments in numbers 0-9
+byte numSegments[10] = {B00111111, B00000110 , B01011011 , B01001111 , B01100110 , B01101101 , B01111101 , B00000111 , B01111111 , B01101111};
 
 //First pixel of each digit. Dots are wired afterthe digits
 uint8_t digits[4] = {0, PIXELS_PER_DIGIT, 2*PIXELS_PER_DIGIT, 3*PIXELS_PER_DIGIT};
@@ -131,16 +66,15 @@ void drawNumber(uint8_t digit, uint8_t num, CHSV color, boolean clearDigit = tru
   if (digit > NUM_DIGITS) digit = 0;  //TBD: better error checking
   if (num > 9) num = 0;
   int pixelOffset = digits[digit];
-  int numSegments = numbers[num].nSegments;
-  uint8_t *segments = numbers[num].segments;
-
-  if (clearDigit) fillDigit(digit, CRGB::Black);
-  for (int i = 0; i < numSegments; i++) { 
-    uint8_t* seg = segmentOffsets[segments[i]];
-    for (int j = 0; j < PIXELS_PER_SEGMENT; j++) {
-      leds[pixelOffset + seg[j]] = color;
+  if (clearDigit) fillDigit (digit, CRGB::Black);
+  byte segments = numSegments[num];
+  for (int i = 0; i < SEGMENTS_PER_DIGIT; i++) {
+    if (segments & 1) {
+      fill_solid(leds + pixelOffset + i*PIXELS_PER_SEGMENT, PIXELS_PER_SEGMENT, color);
     }
+    segments >>= 1;
   }
+  
   if (doShow) FastLED.show();
 };
 
@@ -151,14 +85,22 @@ void drawNumber(uint8_t digit, uint8_t num, CHSV color, boolean clearDigit = tru
 #define ROTATION_STEPS 2038 // the number of steps in one revolution of your motor (28BYJ-48)
 // Creates stepper instances
 // Pins entered in sequence IN1-IN3-IN2-IN4 for proper step sequence
- 
+
+//for Tensy4.1 
+AccelStepper min1(AccelStepper::FULL4WIRE, 13, 15, 14, 16);
+AccelStepper hr2(AccelStepper::FULL4WIRE, 29, 31 , 30, 32);
+AccelStepper min2(AccelStepper::FULL4WIRE, 17, 19, 18, 20);
+AccelStepper dots(AccelStepper::FULL4WIRE, 25, 27, 26, 28);
+AccelStepper hr1(AccelStepper::FULL4WIRE,  8, 10, 9, 11); 
+
+/* 
 //for Lolin D32 
 AccelStepper min2(AccelStepper::FULL4WIRE, 13, 14, 12, 27);
 AccelStepper min1(AccelStepper::FULL4WIRE, 26, 33, 25, 32);
 AccelStepper dots(AccelStepper::FULL4WIRE, 15, 3 , 2, 1);
 AccelStepper hr2(AccelStepper::FULL4WIRE, 16, 5, 17, 18);
 AccelStepper hr1(AccelStepper::FULL4WIRE,  19, 22, 21, 23); 
-
+*/
 /*
 //for WemosD32 with Battery
 AccelStepper min2(AccelStepper::FULL4WIRE, 32, 25, 33, 36);
@@ -193,11 +135,9 @@ void setup() {
   Serial.begin(115200);
 #endif
   
-  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812SERIAL, LED_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(BRIGHTNESS);
-
-  initializeNumbers();
-  initializeLetters();
+  
   delay(2000);
 
   
@@ -206,10 +146,10 @@ void setup() {
   
   randomSeed(analogRead(0));
   for (int i = 0; i < NUM_STEPPERS; i++) {
-    allSteppers[i]->setMaxSpeed(700.0);
-    allSteppers[i]->setAcceleration(800);
+    allSteppers[i]->setMaxSpeed(900);
+    allSteppers[i]->setAcceleration(300);
     //allSteppers[i]->setSpeed(200);
-    allSteppers[i]->setSpeed(500);
+    allSteppers[i]->setSpeed(600);
     //endpoints[i] = random(dist_min, dist_max);
     endpoints[i] = (int) random(500, 2000);
     allSteppers[i]->moveTo(endpoints[i]);
@@ -235,7 +175,7 @@ void fadeDigits(uint8_t fadeAmount = 64) {
       if (leds[k].getAverageLight() < 10) {
         leds[k] = CRGB::Black;
       } else {
-        leds[k].fadeLightBy(fadeAmount);
+        leds[k].nscale8(32);
       }
    }
 }
@@ -256,7 +196,6 @@ void loop() {
     if (endpoints[curMotor] <= 0) {
       
       endpoints[curMotor] = (int) random(500, 2000);
-      allSteppers[curMotor]->setSpeed(500);
       allSteppers[curMotor]->moveTo(endpoints[curMotor]);
       allSteppers[curMotor]->disableOutputs();
       curMotor = (curMotor + 1) % NUM_STEPPERS;
@@ -286,5 +225,6 @@ void loop() {
     // do some periodic updates
     EVERY_N_MILLISECONDS( 40 ) { gHue = (gHue + 1) % 255;  } // slowly cycle the "base color" through the rainbow
     EVERY_N_SECONDS(1) { switchDots(); drawDots(CHSV(gHue, 255, 255), true); }
-    EVERY_N_MILLISECONDS( 100 ) { gCount = (gCount + 1) % 10; fadeDigits(); bUpdateDigit = true; }
+    EVERY_N_MILLISECONDS( 200 ) { gCount = (gCount + 1) % 10; fadeDigits(); bUpdateDigit = true; }
+    
 }
