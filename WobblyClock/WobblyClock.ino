@@ -50,6 +50,13 @@ void drawDots(CHSV color, boolean doShow = false) {
   }
 }
 
+void drawBothDots(CHSV color, boolean doShow = false) {
+  leds[DOT_TOP] = color;
+  leds[DOT_BOTTOM] = color;
+  if (doShow) {
+    FastLED.show();
+  }
+}
 
 void fillDigit(uint8_t digit, CHSV color) {
   uint8_t pixelOffset = digits[digit];
@@ -109,8 +116,8 @@ AccelStepper dots(AccelStepper::FULL4WIRE, 23, 21 ,22, 19);
 AccelStepper hr2(AccelStepper::FULL4WIRE, 18, 17, 5, 16);
 AccelStepper hr1(AccelStepper::FULL4WIRE, 2, 8, 15, 7); 
 */
-AccelStepper *allSteppers[] = {&hr1, &hr2, &dots, &min1, &min2};
-uint8_t NUM_STEPPERS = sizeof(allSteppers)/sizeof(allSteppers[0]);
+#define NUM_STEPPERS 5
+AccelStepper *allSteppers[NUM_STEPPERS] = {&hr1, &hr2, &dots, &min1, &min2};
 
 
 int endpoints[5] = {100, 100, 100, 100, 100};
@@ -180,51 +187,70 @@ void fadeDigits(uint8_t fadeAmount = 64) {
    }
 }
 
-
-uint32_t lastLEDUpdateTime = millis();
-int updateInterval = 300;
+#define PAUSE_TIME 15
 uint8_t curDigit = 0;
-uint8_t gCount = 0;
-uint8_t curMotor = 0;
-uint8_t bUpdateDigit = true;
+unsigned int gCount = 0;
+//uint8_t curMotor = 0;
+uint8_t bUpdateDigits = true;
+boolean bDisplayDots = true;
 
-boolean doClear = false;
+boolean bMoving[NUM_STEPPERS] = {true, false, true, false, true};
+int nextStartTime[NUM_STEPPERS] = {random(PAUSE_TIME), random(PAUSE_TIME), random(PAUSE_TIME), random(PAUSE_TIME), random(PAUSE_TIME)};
 void loop() {
 
   // Only moving one motor at a time for now...
-  if (allSteppers[curMotor]->distanceToGo() == 0) {
-    if (endpoints[curMotor] <= 0) {
+  for (int i = 0; i < NUM_STEPPERS; i++) {
+    uint8_t curMotor = i;
+    if (allSteppers[curMotor]->distanceToGo() == 0) {
+      if (endpoints[curMotor] <= 0) {
+        endpoints[curMotor] = (int) random(500, 2000);
+        allSteppers[curMotor]->moveTo(endpoints[curMotor]);
+        allSteppers[curMotor]->disableOutputs();
+        nextStartTime[curMotor] = (int) (random(PAUSE_TIME) + (millis()/1000));
+        bMoving[curMotor] = false;
+        
+      } else {
+        endpoints[curMotor] = 0;
+        allSteppers[curMotor]->moveTo(endpoints[curMotor]);
+      }
       
-      endpoints[curMotor] = (int) random(500, 2000);
-      allSteppers[curMotor]->moveTo(endpoints[curMotor]);
-      allSteppers[curMotor]->disableOutputs();
-      curMotor = (curMotor + 1) % NUM_STEPPERS;
+    } else if (bMoving[curMotor]) {
+      allSteppers[curMotor]->run();
+    } else if ((millis()/1000) > nextStartTime[curMotor]) {
       allSteppers[curMotor]->enableOutputs();
-      
-    } else {
-      endpoints[curMotor] = 0;
-      allSteppers[curMotor]->moveTo(endpoints[curMotor]);
+      bMoving[curMotor] = true;
     }
-    
-  } else {
-    allSteppers[curMotor]->run();
   }
 
    
  
     //TBD:  fix Interrupts from FastLED conflicting with Interrupts from AccelStepper    
-    if (bUpdateDigit) {   
-      uint8_t curDigit = curMotor;
-      if (curDigit != 2) {  //Only draw digit that is currently moving
-        if (curDigit > 2) curDigit--;
-        drawNumber(curDigit, gCount, CHSV(gHue, 255,255), true, true);
-        bUpdateDigit = false;
-      }
-    } 
+    if (bUpdateDigits) {
+        //int time = (int) (millis()/1000);
+        int time = gCount;
+        int sec = time % 60;
+        CHSV color = CHSV(gHue, 255, 255);
 
+        
+        drawNumber(3, (uint8_t) sec % 10, CHSV(gHue, 255,255), true, false);
+        drawNumber(2, (uint8_t) (sec/10), CHSV((gHue + 60) %255,255,255) , true, false);
+        int min = time / 60;
+        drawNumber(1, (uint8_t) (min % 10), CHSV((gHue + 120) %255,255,255), true, false);
+        drawNumber(0, (uint8_t) (min /10), CHSV((gHue + 180) %255,255,255), true, false);
+
+        //drawBothDots(bDisplayDots ? CHSV((gHue + 45) % 255,255,255) : CHSV(0,0,0), true);
+        //bDisplayDots = !bDisplayDots;
+        
+        bUpdateDigits = false;
+        switchDots();
+        drawDots(CHSV((gHue + 90) %255,255,255), true);
+        
+    } 
+    
     // do some periodic updates
     EVERY_N_MILLISECONDS( 40 ) { gHue = (gHue + 1) % 255;  } // slowly cycle the "base color" through the rainbow
-    EVERY_N_SECONDS(1) { switchDots(); drawDots(CHSV(gHue, 255, 255), true); }
-    EVERY_N_MILLISECONDS( 200 ) { gCount = (gCount + 1) % 10; fadeDigits(); bUpdateDigit = true; }
+    EVERY_N_SECONDS(1) { gCount++; bUpdateDigits = true;}
+   
+    //EVERY_N_MILLISECONDS( 100 ) { gCount = (gCount + 1) % 10;}
     
 }
